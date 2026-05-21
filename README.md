@@ -5,7 +5,7 @@ HT-Demux is a scalable sample demultiplexing framework for high-throughput hasht
 HT-Demux models sample-tag signals with shared positive and negative components and performs posterior-based assignment over singlet and multiplet configurations. This design allows the method to assign droplet-level sample identities, identify multiplets, and mark low-confidence droplets as unassigned.
 
 <p align="center">
-  <img src="figs/fig1.png" width="900">
+  <img src="figs/fig0.png" width="900">
 </p>
 
 <p align="center">
