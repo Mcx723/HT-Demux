@@ -44,22 +44,6 @@ barcodes.tsv or barcodes.tsv.gz
 features.tsv or features.tsv.gz
 ```
 
-The matrix should be organized as:
-
-```text
-features × droplets
-```
-
-where rows correspond to HTO/CMO/sample-tag features and columns correspond to droplet or cell barcodes.
-
-A typical `features.tsv` file looks like:
-
-```text
-HTO_1    HTO_1    Antibody Capture
-HTO_2    HTO_2    Antibody Capture
-HTO_3    HTO_3    Antibody Capture
-```
-
 ## Quick start
 
 A typical HT-Demux workflow consists of four steps:
