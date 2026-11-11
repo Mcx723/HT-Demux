@@ -218,3 +218,42 @@ For questions, issues, or suggestions, please open an issue on GitHub:
 ```text
 https://github.com/Mcx723/HT-Demux/issues
 ```
+
+
+## Current shared-inference and benchmark options
+
+The existing model modules also expose `DiscreteLogNormalCluster` (in
+`models.base_cluster`) and `FactorizedSharedCluster` / `fit_factorized_em`
+(in `models.optimizer`). No extra model files are required. NB shared EM updates
+both component means and weighted maximum-likelihood dispersion parameters.
+Large tag spaces can use implicit all-order configurations instead of materializing
+all tag subsets. `model_type="auto"` compares supported count-emission families
+using likelihood-based BIC without reference labels.
+
+A command-line entry is available in `benchmark/HTDemux.py`:
+
+```bash
+PYTHONPATH="$PWD" python benchmark/HTDemux.py \
+  --input-dir /path/to/10x_hto_matrix \
+  --output-dir /path/to/output \
+  --model-type auto --configuration-prior auto --max-iter 100
+```
+
+The classifier supports joint, posterior, hierarchical and marginal decision modes.
+The benchmark CLI defaults to hierarchical decisions with multiplet prior odds
+scaled by 0.5; `--multiplet-prior-scale 1` disables that calibration in the modes
+where it applies. These settings are configurable assumptions, not estimates of
+known truth. `--signal-shape-min` and `--init-tail-fraction` control the NB signal
+shape bound and optional initialization tail. Run `--help` for the full interface.
+
+Benchmark scripts now include `CMDdemux.R`, `deMULTIplex2.R` and `HTDemux.py`.
+The demuxmix implementation is `benchmark/demuxmix.R`; the older
+`benchmark/demumix.R` remains a compatibility entry. R wrappers accept
+`BENCH_INPUT_DIR` and `BENCH_OUTPUT_DIR`; other options and strict-default modes
+are documented in each script. HashSolo uses its Scanpy interface, and GMM-Demux
+uses its own `GMMD_INPUT_DIR` / `GMMD_OUTPUT_DIR` variables. Install comparator
+packages in their corresponding Python/R environments before running them.
+
+Experiment outputs are written to the selected output directories. This code
+update does not include simulation matrices, fitted results, manuscript figure
+notebooks, runtime tables, or other local research data.
