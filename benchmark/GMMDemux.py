@@ -13,15 +13,24 @@ import shutil
 import scipy.io as io
 import scipy.sparse as sp
 
+from GMM_Demux import classify_drops
+from GMM_Demux import GMM_IO
+
+# Preserve progress in redirected logs even if the resource monitor kills us.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(line_buffering=True)
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(line_buffering=True)
+
 
 # =========================
 # Only change here
 # =========================
-DATASET = ""
+DATASET = os.environ.get("GMMD_DATASET", "")
 
 PROJECT_DIR = Path("./..")  # Adjust if this script is not in the root of the project
-INPUT_DIR = PROJECT_DIR / DATASET
-OUTPUT_DIR = PROJECT_DIR / f"results{DATASET}" / "GMMDemux"
+INPUT_DIR = Path(os.environ.get("GMMD_INPUT_DIR", PROJECT_DIR / DATASET))
+OUTPUT_DIR = Path(os.environ.get("GMMD_OUTPUT_DIR", PROJECT_DIR / f"results{DATASET}" / "GMMDemux"))
 
 
 def read_features(features_file):
@@ -102,6 +111,13 @@ def gzip_file(path, remove_original=True):
         path.unlink()
 
     return gz_path
+
+
+def get_random_seed():
+    seed = os.environ.get("GMMD_RANDOM_SEED", "")
+    if seed == "":
+        return None
+    return int(seed)
 
 
 def run_gmmdemux_clean(
@@ -221,7 +237,51 @@ def run_gmmdemux_clean(
     print("Step 4: running GMM-Demux...")
 
     out_full = output_dir / "full_report"
-    cmd = ["GMM-demux", str(temp_dir), hto_list, "-f", str(out_full)]
+    out_simplified = output_dir / "simplified_report"
+    confidence_threshold = float(os.environ.get("GMMD_CONFIDENCE_THRESHOLD", "0.8"))
+    max_full_hto = int(os.environ.get("GMMD_MAX_FULL_HTO", "20"))
+    force_full = os.environ.get("GMMD_FORCE_FULL", "0") == "1"
+    allow_adaptation = os.environ.get("GMMD_ALLOW_SAFE_PER_TAG", "0") == "1"
+
+    if len(hto_names) > max_full_hto and not force_full and not allow_adaptation:
+        reason = (
+            f"Official GMM-Demux enumerates 2^{len(hto_names)} configurations; "
+            f"the declared resource policy permits at most 2^{max_full_hto}. "
+            "No approximate algorithm was substituted."
+        )
+        pd.DataFrame([{
+            "method": "GMMDemux", "status": "resource_limit",
+            "variant": "official", "n_hto": len(hto_names),
+            "max_full_hto": max_full_hto, "error_message": reason,
+        }]).to_csv(output_dir / "GMMDemux_runtime.csv", index=False)
+        shutil.rmtree(temp_dir)
+        print(reason)
+        sys.exit(3)
+
+    if len(hto_names) > max_full_hto and not force_full:
+        cmd = [
+            "GMMDemux-safe-per-tag",
+            str(temp_dir),
+            hto_list,
+            "-t",
+            str(confidence_threshold),
+        ]
+    else:
+        cmd = [
+            "GMM-demux",
+            str(temp_dir),
+            hto_list,
+            "-f",
+            str(out_full),
+            "-s",
+            str(out_simplified),
+            "-o",
+            str(output_dir / "SSD_mtx"),
+            "-t",
+            str(confidence_threshold),
+            "-rs",
+            str(get_random_seed() if get_random_seed() is not None else 1),
+        ]
 
     print("Command:")
     print(" ".join(cmd))
@@ -229,26 +289,62 @@ def run_gmmdemux_clean(
     method_start_time = time.time()
 
     try:
-        result = subprocess.run(
-            cmd,
-            check=True,
-            capture_output=True,
-            text=True
-        )
+        if cmd[0] == "GMMDemux-safe-per-tag":
+            print(
+                "Using safe per-tag mode because full GMM-demux enumerates all "
+                f"2^{len(hto_names)} HTO combinations."
+            )
+            full_df, GMM_df = GMM_IO.read_cellranger(str(temp_dir), hto_names)
+            high_array, low_array = classify_drops.obtain_arrays(
+                GMM_df, get_random_seed()
+            )
+            high = np.column_stack(high_array)
+            high_binary = high >= confidence_threshold
+            n_high = high_binary.sum(axis=1)
+            best_idx = high.argmax(axis=1)
+            best_prob = high.max(axis=1)
+
+            sample_call = np.full(GMM_df.shape[0], "Unassigned", dtype=object)
+            sample_call[n_high > 1] = "Multiplet"
+            singlet_mask = n_high == 1
+            sample_call[singlet_mask] = np.array(hto_names, dtype=object)[best_idx[singlet_mask]]
+
+            positive_tags = []
+            for row in high_binary:
+                tags = [hto_names[i] for i, val in enumerate(row) if val]
+                positive_tags.append("+".join(tags) if tags else "")
+
+            classification = pd.DataFrame({
+                "droplet_id": GMM_df.index.astype(str),
+                "sample_call": sample_call,
+                "n_positive_tags": n_high,
+                "positive_tags": positive_tags,
+                "best_tag": np.array(hto_names, dtype=object)[best_idx],
+                "best_high_probability": best_prob,
+                "confidence_threshold": confidence_threshold,
+                "mode": "safe_per_tag",
+            })
+            classification.to_csv(output_dir / "GMMDemux_classification.csv", index=False)
+            summary_df = classification.rename(columns={"sample_call": "final_assign"})
+            summary_df.to_csv(output_dir / "GMMDemux_summary.csv", index=False)
+            print("Safe per-tag classification counts:")
+            print(summary_df["final_assign"].value_counts(dropna=False).head(30).to_string())
+            status = "completed_safe_per_tag"
+            error_message = ""
+        else:
+            subprocess.run(
+                cmd,
+                check=True,
+                env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            )
+
+            print("GMM-Demux finished successfully.")
+
+            status = "completed"
+            error_message = ""
 
         method_end_time = time.time()
         method_runtime_sec = method_end_time - method_start_time
-
-        print("GMM-Demux finished successfully.")
-        if result.stdout:
-            print("STDOUT:")
-            print(result.stdout)
-        if result.stderr:
-            print("STDERR:")
-            print(result.stderr)
-
-        status = "completed"
-        error_message = ""
 
     except subprocess.CalledProcessError as e:
         method_end_time = time.time()
@@ -284,6 +380,8 @@ def run_gmmdemux_clean(
         "n_empty_removed": len(barcodes) - len(non_empty_indices),
         "hto_list": hto_list,
         "command": " ".join(cmd),
+        "confidence_threshold": confidence_threshold,
+        "max_full_hto": max_full_hto,
         "status": status,
         "method_runtime_sec": method_runtime_sec,
         "total_runtime_sec": total_runtime_sec,

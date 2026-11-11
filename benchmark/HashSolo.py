@@ -12,8 +12,8 @@ import scanpy as sc
 import scanpy.external as sce
 
 
-input_dir = "./data/HashSolo"
-output_dir = "./results/HashSolo"
+input_dir = os.environ.get("BENCH_INPUT_DIR", "./data/HashSolo")
+output_dir = os.environ.get("BENCH_OUTPUT_DIR", "./results/HashSolo")
 os.makedirs(output_dir, exist_ok=True)
 
 script_start_time = time.time()

@@ -6,8 +6,8 @@ suppressPackageStartupMessages({
   library(DropletUtils)
 })
 
-input_dir <- "./data/hashedDrops"
-output_dir <- "./results/hashedDrops"
+input_dir <- Sys.getenv("BENCH_INPUT_DIR", "./data/hashedDrops")
+output_dir <- Sys.getenv("BENCH_OUTPUT_DIR", "./results/hashedDrops")
 if(!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
 
 hd_params <- list(
@@ -40,6 +40,14 @@ colnames(matrix) <- barcodes
 # 用第 1 列或第 2 列都可以。这里用第 1 列最稳。
 rownames(matrix) <- make.unique(as.character(features[, 1]))
 
+min_prop_rule <- Sys.getenv("BENCH_HASHEDDROPS_MIN_PROP", "default")
+if (min_prop_rule == "half_sample_fraction") {
+  hd_params$min.prop <- 0.5 / nrow(matrix)
+} else if (min_prop_rule != "default") {
+  stop("Unknown hashedDrops min.prop rule")
+}
+saveRDS(hd_params, file.path(output_dir, "hashedDrops_parameters.rds"))
+
 cat("Input matrix dimension:", nrow(matrix), "HTOs x", ncol(matrix), "droplets\n")
 
 # =========================
@@ -65,6 +73,9 @@ runtime_df <- data.frame(
   start_time = as.character(start_time),
   end_time = as.character(end_time),
   runtime_sec = runtime_sec,
+  min_prop = hd_params$min.prop,
+  min_prop_rule = min_prop_rule,
+  default_parameters = min_prop_rule == "default",
   stringsAsFactors = FALSE
 )
 
@@ -103,6 +114,11 @@ summary_df <- data.frame(
   droplet_id = hd_df$droplet_id,
   nHTO_total = colSums(matrix),
   HTO_maxID = rownames(matrix)[top_indices],
+  final_assign = ifelse(
+    hd_df$Doublet,
+    "Multiplet",
+    ifelse(hd_df$Confident, rownames(matrix)[hd_df$Best], "Unassigned")
+  ),
   HTO_margin = hd_df$LogFC,
   stringsAsFactors = FALSE
 )

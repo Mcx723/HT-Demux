@@ -52,6 +52,7 @@ class DropletFactory:
             high=self.m_droplets,
             size=n_cells
         )
+        self.last_droplet_map = droplet_map
 
         # 2. Vectorized aggregation (supports float or int tensors)
         droplet_matrix = torch.zeros(
@@ -84,6 +85,7 @@ class DropletFactory:
 
         # 4. Remove empty droplets and reindex
         active_indices = gt.index.values
+        self.last_active_indices = active_indices.copy()
         filtered_matrix = droplet_matrix[active_indices]
         final_gt = gt.reset_index(drop=True)
 

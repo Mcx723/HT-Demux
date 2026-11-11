@@ -7,9 +7,12 @@ suppressPackageStartupMessages({
   library(Matrix)
 })
 
-input_dir <- "./data/hashDemux"
-output_dir <- "./results/hashDemux"
+input_dir <- Sys.getenv("BENCH_INPUT_DIR", "./data/hashDemux")
+output_dir <- Sys.getenv("BENCH_OUTPUT_DIR", "./results/hashDemux")
 if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
+rate_setting <- Sys.getenv("BENCH_HASHDEMUX_DOUBLET_RATE", "default")
+expected_doublet_rate <- if (rate_setting == "default") NULL else as.numeric(rate_setting)
+set.seed(as.integer(Sys.getenv("BENCH_RANDOM_SEED", "42")))
 
 script_start_time <- Sys.time()
 
@@ -56,10 +59,10 @@ seurat_obj <- NormalizeData(
 seurat_obj <- clustering_based_demux(
   seurat_object = seurat_obj,
   assay = "HTO",
-  expected_doublet_rate = 0.05,
+  expected_doublet_rate = expected_doublet_rate,
   knns = seq(5, 30, 5),
   resolutions = c(1, 2, 3, 4),
-  nCores = NULL
+  nCores = if (Sys.getenv("BENCH_NCORES", "") == "") NULL else as.integer(Sys.getenv("BENCH_NCORES"))
 )
 
 method_end_time <- Sys.time()
@@ -91,8 +94,9 @@ top_indices <- apply(norm_mat, 1, which.max)
 
 meta <- seurat_obj@meta.data
 
-final_assign <- if ("classification" %in% colnames(meta)) {
-  meta$classification
+final_assign <- if (all(c("classification", "sampleBC") %in% colnames(meta))) {
+  ifelse(meta$classification == "Singlet", as.character(meta$sampleBC),
+         ifelse(meta$classification == "Doublet", "Multiplet", "Unassigned"))
 } else if ("hash.ID" %in% colnames(meta)) {
   meta$hash.ID
 } else if ("HTO_classification" %in% colnames(meta)) {
@@ -135,7 +139,7 @@ runtime_df <- data.frame(
   input_dir = input_dir,
   n_hto = nrow(matrix),
   n_droplets = ncol(matrix),
-  expected_doublet_rate = 0.05,
+  expected_doublet_rate = if (is.null(expected_doublet_rate)) "default_NULL" else as.character(expected_doublet_rate),
   knns = paste(seq(5, 30, 5), collapse = ","),
   resolutions = paste(c(1, 2, 3, 4), collapse = ","),
   method_start_time = as.character(method_start_time),

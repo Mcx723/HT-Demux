@@ -12,7 +12,10 @@ class ParamSharedCluster(nn.Module):
         # 使用 register_buffer 确保 configs 随模型移动 (CPU/GPU)
         self.register_buffer('configs', configs.float())
         self.K, self.H = configs.shape
-        self.pi_logits = nn.Parameter(torch.zeros(self.K))
+        # Equal initial mass per configuration order, rather than letting the
+        # combinatorial number of pairs dictate the initial multiplet prior.
+        _, inverse, sizes = torch.unique(configs.sum(1), return_inverse=True, return_counts=True)
+        self.pi_logits = nn.Parameter(-torch.log(sizes[inverse].float()))
         self.posteriors: Optional[torch.Tensor] = None
 
     @property

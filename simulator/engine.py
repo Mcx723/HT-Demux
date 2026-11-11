@@ -19,8 +19,9 @@ class CellEngine(ABC):
         self.cell_eff_sd = 0.5        # cell-level capture efficiency (log-space)
         self.ambient_cell_sd = 0.05   # ambient fluctuation per cell
 
-        # donor capture failure (key realism factor)
-        self.p_pos_given_donor = 0.9  # P(signal | true donor)
+        # All donor labels are captured by default; optional dropout remains explicit.
+        self.p_pos_given_donor = 1.0  # P(signal | true donor)
+        self.donor_probabilities = None
 
     def _sample_latent_space(self, n_cells: int):
         """
@@ -35,7 +36,8 @@ class CellEngine(ABC):
         """
         h = self.registry.h_tags
 
-        donor_indices = self.rng.choice(h, size=n_cells)
+        donor_indices = self.rng.choice(h, size=n_cells, p=self.donor_probabilities)
+        self.last_signal_captured = np.zeros(n_cells, dtype=bool)
         amb = torch.from_numpy(self.registry.ambient_vector).float()
 
         latent_matrix = torch.zeros((n_cells, h))
@@ -73,6 +75,7 @@ class CellEngine(ABC):
             if n_pos > 0:
                 # donor capture failure (Bernoulli)
                 is_true_pos = torch.rand(n_pos) < self.p_pos_given_donor
+                self.last_signal_captured[is_donor] = is_true_pos.numpy()
 
                 sig_noise = torch.normal(
                     mean=p["mu_sig"],
